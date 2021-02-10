@@ -18,13 +18,13 @@ import (
 
 const unavailableArtistID = "-1"
 
-type ExternalInfo interface {
+type ExternalMetadata interface {
 	UpdateArtistInfo(ctx context.Context, id string, count int, includeNotPresent bool) (*model.Artist, error)
 	SimilarSongs(ctx context.Context, id string, count int) (model.MediaFiles, error)
 	TopSongs(ctx context.Context, artist string, count int) (model.MediaFiles, error)
 }
 
-type externalInfo struct {
+type externalMetadata struct {
 	ds model.DataStore
 }
 
@@ -33,11 +33,11 @@ type auxArtist struct {
 	Name string
 }
 
-func NewExternalInfo2(ds model.DataStore) ExternalInfo {
-	return &externalInfo{ds: ds}
+func NewExternalMetadata(ds model.DataStore) ExternalMetadata {
+	return &externalMetadata{ds: ds}
 }
 
-func (e *externalInfo) initAgents(ctx context.Context) []agents.Interface {
+func (e *externalMetadata) initAgents(ctx context.Context) []agents.Interface {
 	order := strings.Split(conf.Server.Agents, ",")
 	order = append(order, agents.PlaceholderAgentName)
 	var res []agents.Interface
@@ -54,7 +54,7 @@ func (e *externalInfo) initAgents(ctx context.Context) []agents.Interface {
 	return res
 }
 
-func (e *externalInfo) getArtist(ctx context.Context, id string) (*auxArtist, error) {
+func (e *externalMetadata) getArtist(ctx context.Context, id string) (*auxArtist, error) {
 	var entity interface{}
 	entity, err := GetEntityByID(ctx, e.ds, id)
 	if err != nil {
@@ -87,7 +87,7 @@ func clearName(name string) string {
 	return name
 }
 
-func (e *externalInfo) UpdateArtistInfo(ctx context.Context, id string, similarCount int, includeNotPresent bool) (*model.Artist, error) {
+func (e *externalMetadata) UpdateArtistInfo(ctx context.Context, id string, similarCount int, includeNotPresent bool) (*model.Artist, error) {
 	allAgents := e.initAgents(ctx)
 	artist, err := e.getArtist(ctx, id)
 	if err != nil {
@@ -141,7 +141,7 @@ func (e *externalInfo) UpdateArtistInfo(ctx context.Context, id string, similarC
 	return &artist.Artist, nil
 }
 
-func (e *externalInfo) SimilarSongs(ctx context.Context, id string, count int) (model.MediaFiles, error) {
+func (e *externalMetadata) SimilarSongs(ctx context.Context, id string, count int) (model.MediaFiles, error) {
 	allAgents := e.initAgents(ctx)
 	artist, err := e.getArtist(ctx, id)
 	if err != nil {
@@ -175,7 +175,7 @@ func (e *externalInfo) SimilarSongs(ctx context.Context, id string, count int) (
 	})
 }
 
-func (e *externalInfo) TopSongs(ctx context.Context, artistName string, count int) (model.MediaFiles, error) {
+func (e *externalMetadata) TopSongs(ctx context.Context, artistName string, count int) (model.MediaFiles, error) {
 	allAgents := e.initAgents(ctx)
 	artist, err := e.findArtistByName(ctx, artistName)
 	if err != nil {
@@ -199,7 +199,7 @@ func (e *externalInfo) TopSongs(ctx context.Context, artistName string, count in
 	return mfs, nil
 }
 
-func (e *externalInfo) findMatchingTrack(ctx context.Context, mbid string, artistID, title string) (*model.MediaFile, error) {
+func (e *externalMetadata) findMatchingTrack(ctx context.Context, mbid string, artistID, title string) (*model.MediaFile, error) {
 	if mbid != "" {
 		mfs, err := e.ds.MediaFile(ctx).GetAll(model.QueryOptions{
 			Filters: squirrel.Eq{"mbz_track_id": mbid},
@@ -233,7 +233,7 @@ func isDone(ctx context.Context) bool {
 	}
 }
 
-func (e *externalInfo) callGetMBID(ctx context.Context, allAgents []agents.Interface, artist *auxArtist) {
+func (e *externalMetadata) callGetMBID(ctx context.Context, allAgents []agents.Interface, artist *auxArtist) {
 	start := time.Now()
 	for _, a := range allAgents {
 		if isDone(ctx) {
@@ -243,7 +243,7 @@ func (e *externalInfo) callGetMBID(ctx context.Context, allAgents []agents.Inter
 		if !ok {
 			continue
 		}
-		mbid, err := agent.GetMBID(artist.Name)
+		mbid, err := agent.GetMBID(artist.ID, artist.Name)
 		if mbid != "" && err == nil {
 			artist.MbzArtistID = mbid
 			log.Debug(ctx, "Got MBID", "agent", a.AgentName(), "artist", artist.Name, "mbid", mbid, "elapsed", time.Since(start))
@@ -252,7 +252,7 @@ func (e *externalInfo) callGetMBID(ctx context.Context, allAgents []agents.Inter
 	}
 }
 
-func (e *externalInfo) callGetTopSongs(ctx context.Context, allAgents []agents.Interface, artist *auxArtist,
+func (e *externalMetadata) callGetTopSongs(ctx context.Context, allAgents []agents.Interface, artist *auxArtist,
 	count int) ([]agents.Song, error) {
 	start := time.Now()
 	for _, a := range allAgents {
@@ -263,7 +263,7 @@ func (e *externalInfo) callGetTopSongs(ctx context.Context, allAgents []agents.I
 		if !ok {
 			continue
 		}
-		songs, err := agent.GetTopSongs(artist.Name, artist.MbzArtistID, count)
+		songs, err := agent.GetTopSongs(artist.ID, artist.Name, artist.MbzArtistID, count)
 		if len(songs) > 0 && err == nil {
 			log.Debug(ctx, "Got Top Songs", "agent", a.AgentName(), "artist", artist.Name, "songs", songs, "elapsed", time.Since(start))
 			return songs, err
@@ -272,7 +272,7 @@ func (e *externalInfo) callGetTopSongs(ctx context.Context, allAgents []agents.I
 	return nil, nil
 }
 
-func (e *externalInfo) callGetURL(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, wg *sync.WaitGroup) {
+func (e *externalMetadata) callGetURL(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -285,7 +285,7 @@ func (e *externalInfo) callGetURL(ctx context.Context, allAgents []agents.Interf
 			if !ok {
 				continue
 			}
-			url, err := agent.GetURL(artist.Name, artist.MbzArtistID)
+			url, err := agent.GetURL(artist.ID, artist.Name, artist.MbzArtistID)
 			if url != "" && err == nil {
 				artist.ExternalUrl = url
 				log.Debug(ctx, "Got External Url", "agent", a.AgentName(), "artist", artist.Name, "url", url, "elapsed", time.Since(start))
@@ -295,7 +295,7 @@ func (e *externalInfo) callGetURL(ctx context.Context, allAgents []agents.Interf
 	}()
 }
 
-func (e *externalInfo) callGetBiography(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, wg *sync.WaitGroup) {
+func (e *externalMetadata) callGetBiography(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -308,7 +308,7 @@ func (e *externalInfo) callGetBiography(ctx context.Context, allAgents []agents.
 			if !ok {
 				continue
 			}
-			bio, err := agent.GetBiography(clearName(artist.Name), artist.MbzArtistID)
+			bio, err := agent.GetBiography(artist.ID, clearName(artist.Name), artist.MbzArtistID)
 			if bio != "" && err == nil {
 				policy := bluemonday.UGCPolicy()
 				bio = policy.Sanitize(bio)
@@ -321,7 +321,7 @@ func (e *externalInfo) callGetBiography(ctx context.Context, allAgents []agents.
 	}()
 }
 
-func (e *externalInfo) callGetImage(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, wg *sync.WaitGroup) {
+func (e *externalMetadata) callGetImage(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -334,7 +334,7 @@ func (e *externalInfo) callGetImage(ctx context.Context, allAgents []agents.Inte
 			if !ok {
 				continue
 			}
-			images, err := agent.GetImages(artist.Name, artist.MbzArtistID)
+			images, err := agent.GetImages(artist.ID, artist.Name, artist.MbzArtistID)
 			if len(images) == 0 || err != nil {
 				continue
 			}
@@ -354,7 +354,7 @@ func (e *externalInfo) callGetImage(ctx context.Context, allAgents []agents.Inte
 	}()
 }
 
-func (e *externalInfo) callGetSimilar(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, limit int, wg *sync.WaitGroup) {
+func (e *externalMetadata) callGetSimilar(ctx context.Context, allAgents []agents.Interface, artist *auxArtist, limit int, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -367,7 +367,7 @@ func (e *externalInfo) callGetSimilar(ctx context.Context, allAgents []agents.In
 			if !ok {
 				continue
 			}
-			similar, err := agent.GetSimilar(artist.Name, artist.MbzArtistID, limit)
+			similar, err := agent.GetSimilar(artist.ID, artist.Name, artist.MbzArtistID, limit)
 			if len(similar) == 0 || err != nil {
 				continue
 			}
@@ -382,7 +382,7 @@ func (e *externalInfo) callGetSimilar(ctx context.Context, allAgents []agents.In
 	}()
 }
 
-func (e *externalInfo) mapSimilarArtists(ctx context.Context, similar []agents.Artist, includeNotPresent bool) (model.Artists, error) {
+func (e *externalMetadata) mapSimilarArtists(ctx context.Context, similar []agents.Artist, includeNotPresent bool) (model.Artists, error) {
 	var result model.Artists
 	var notPresent []string
 
@@ -407,7 +407,7 @@ func (e *externalInfo) mapSimilarArtists(ctx context.Context, similar []agents.A
 	return result, nil
 }
 
-func (e *externalInfo) findArtistByName(ctx context.Context, artistName string) (*auxArtist, error) {
+func (e *externalMetadata) findArtistByName(ctx context.Context, artistName string) (*auxArtist, error) {
 	artists, err := e.ds.Artist(ctx).GetAll(model.QueryOptions{
 		Filters: squirrel.Like{"name": artistName},
 		Max:     1,
@@ -425,7 +425,7 @@ func (e *externalInfo) findArtistByName(ctx context.Context, artistName string) 
 	return artist, nil
 }
 
-func (e *externalInfo) loadSimilar(ctx context.Context, artist *auxArtist, includeNotPresent bool) error {
+func (e *externalMetadata) loadSimilar(ctx context.Context, artist *auxArtist, includeNotPresent bool) error {
 	var ids []string
 	for _, sa := range artist.SimilarArtists {
 		if sa.ID == unavailableArtistID {

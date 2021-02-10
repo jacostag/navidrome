@@ -9,9 +9,9 @@ import (
 
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
-	"github.com/navidrome/navidrome/core/spotify"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
+	"github.com/navidrome/navidrome/utils/spotify"
 	"github.com/xrash/smetrics"
 )
 
@@ -39,7 +39,7 @@ func (s *spotifyAgent) AgentName() string {
 	return spotifyAgentName
 }
 
-func (s *spotifyAgent) GetImages(name, mbid string) ([]ArtistImage, error) {
+func (s *spotifyAgent) GetImages(id, name, mbid string) ([]ArtistImage, error) {
 	a, err := s.searchArtist(name)
 	if err != nil {
 		if err == model.ErrNotFound {
